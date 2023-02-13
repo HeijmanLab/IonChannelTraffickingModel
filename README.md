@@ -1,7 +1,7 @@
 # A trafficking model for K<sub>v</sub>11.1 channels 
 
 This model is part of the Journal of Physiology (2022) paper: 'In-silico analysis of the dynamic regulation of cardiac electrophysiology by K<sub>v</sub>11.1 ion-channel trafficking' by Stefan Meier, Adaïa Grundland, Dobromir Dobrev, Paul G.A. Volders, and Jordi Heijman. 
-Doi: 10.1113/JP283976
+Doi: [10.1113/JP283976](https://physoc.onlinelibrary.wiley.com/doi/10.1113/JP283976)
 
 :file_folder: The [MMT](https://github.com/HeijmanLab/IonChannelTraffickingModel/tree/main/MMT) folder contains the adapted O'Hara Rudy human ventricular cardiomyocyte model (ORd), wherein Clancy and Rudy's I<sub>Kr</sub> Markov model was implemented and adapted to model the acute effects of temperature on I<sub>Kr</sub>  gating. Moreover, the trafficking model with its modulators (i.e., temperature, drugs, and extracellular K<sup>+</sup> was also added to the ORd model. 
 
