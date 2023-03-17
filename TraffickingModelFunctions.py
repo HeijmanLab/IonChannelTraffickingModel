@@ -3461,3 +3461,806 @@ def graphpad_exp(d, threshold):
                 export.append(merged)
     
     return export
+
+def mono_exp(x, a, tau, c):
+    """ Mono-exponential function to calculate the rates
+    """
+    return a * np.exp(-x/tau) + c
+
+
+def double_exp(x, a1, tau1, a2, tau2, c):
+    """ Double-exponential function to calculate the rates
+    """
+    return a1 * np.exp(-x/tau1) + a2 * np.exp(-x/tau2) + c
+
+def Q10(a1, a2, t1, t2):
+    """Q10 function 
+    The Q10 function calculates the Q10 coefficients which can be used
+    for temperature correction. The Q10 coefficient is the change in conductance
+    or rate for for each 10°C change in temperature.
+    
+    Parameters
+    ----------
+    a1 : Float/Integer
+        Rate at the first temperature (t1) (e.g. activation rate at t1). 
+        
+    a2 : Float/Integer
+         Rate at the second temperature (t2) (e.g. activation rate at t2).
+         
+    t1 : Float/Integer
+         First temperature (e.g. room temperature 22°C).
+    
+    t2 : Float/Integer
+        Second temperature (e.g. physiological temperature 37°C).
+
+    Returns
+    -------
+    Q10 value.
+    
+    """
+    q10 = (a1 / a2)**(10.0/(t2 - t1))
+    return q10
+    
+def ZhouActTime(modeltype, temp, sim, time, tot_dur, hold, t_steps, showit = 0, showcurve = 0, log = 0):
+    """ ZhouActTime function
+    The ZhouActTime function creates an enveloppe of tail currents from which the steady-state peak values and
+    tail current values can be calculated which are needed for curve fitting. The voltage clamp protocols from Zhou
+    et al. 1998 are used to calculate the time constants.
+    
+    Parameters
+    ----------
+    modeltype : Integer
+        Determine the modeltype (See MMT file).
+        
+    temp : Integer
+         Temperature input in degrees Celsius.
+         
+    sim : Myokit simulation protocol
+         Simulation protocol.
+    
+    time : Integer
+        Maximum time of all events in the protocol.
+        
+    tot_dur : Integer
+        Total duration of one iteration.
+            
+    hold : Integer
+        Duration of the holding potential.
+             
+    t_steps: Myokit simulation protocol
+        Simulation protocol.
+        
+    showit : Integer
+        Visualize a plot with score one and score two visualizes the curve fitting.
+        
+    showcurve : Integer
+        Visualizes the curve fitting procedure for score one.
+               
+    log : Integer
+        Create a logarithmic x-axis for visualization.
+        
+
+    Returns
+    -------
+    Dictionary with the peak, tail and time constant values
+    """ 
+    # Reset the initial states for each iteration 
+    sim.reset()
+    
+    # Set the model type
+    sim.set_constant('ikr.IKr_modeltype', modeltype) 
+    
+    # Set the maximum stepsize to 2ms
+    sim.set_max_step_size(2) 
+    
+    # Set the temperature
+    sim.set_constant('ikr_MM.IKr_temp', temp)
+    
+    # Set the extracellular potassium concentration 
+    sim.set_constant('extra.Ko', 4)
+    
+    # Set tolerance to counter suboptimal optimalisation with CVODE
+    sim.set_tolerance(1e-8, 1e-8)
+    
+    # Run the simulation protocol and log several variables
+    dur = sim.run(time, log=['engine.time', 'membrane.V', 'ikr.IKr'])
+    
+    # Plot the curves for each step
+    if showit == 1: 
+        plt.subplot(2,1,1)
+        plt.plot(dur['engine.time'], dur['membrane.V'])
+        plt.xlabel('Time [ms]')
+        plt.ylabel('Membrane potential [mV]')
+        plt.title('Voltage-clamp protocol in steps')
+        plt.subplot(2,1,2)
+        plt.plot(dur['engine.time'], dur['ikr.IKr'])
+        plt.title('Step-wise recorded traces')
+        plt.xlabel('Time [ms]')
+        plt.ylabel('pA/pF')
+        plt.tight_layout()
+        
+    # Split the log into smaller chunks to overlay; to get the individual steps 
+    ds = dur.split_periodic(tot_dur, adjust=True) 
+    
+    # Initialize the peak current variable
+    Ikr_steady = np.zeros(len(ds)) 
+    # Initialize the tail current variable
+    Ikr_tail = np.zeros(len(ds)) 
+    # Initialize the peak current variable
+    Ikr_peak = np.zeros(len(ds))
+
+    # Trim each new log to contain the steps of interest by enumerate through 
+    # the individual duration steps     
+    for k, d in enumerate(ds): 
+        # Adjust is the time at the start of every sweep which is set to zero
+        steady = d.trim_left(hold, adjust = True) 
+        # Duration of the peak/steady current 
+        steady = steady.trim_right(t_steps[k])
+        # Total step duration (holding potential + peak current + margin of 1ms) to ensure the tail current
+        tail = d.trim_left((hold + t_steps[k] + 1), adjust = True) 
+        # Obtain the absolute tail current to prevent sign changes around reversal potential
+        tail_IKr_abs = abs(np.array(tail['ikr.IKr'])) 
+        # IKr tail amplitude was defined as current at the start of the repol. step minus the current at the end of repol.
+        Ikr_tail[k] = max(tail_IKr_abs) - min(tail_IKr_abs)
+        # Note, you could also just take the max of the tail which does not meaningfully affect the results (if any, few 100ths).
+        #Ikr_tail[k] = max(tail_IKr_abs)
+        # Calculate the peak steady current for each step
+        Ikr_peak[k] = max(steady['ikr.IKr'])
+        
+        # Plot the voltage-clamp protocol together with the corresponding traces 
+        if showit == 1:
+            plt.figure()
+            plt.subplot(2,1,1)
+            plt.plot(d['engine.time'], d['membrane.V'])
+            plt.ylabel('Membrane potential [mV]')
+            plt.title('Voltage-clamp protocol')
+            plt.subplot(2,1,2)
+            plt.plot(d['engine.time'], d['ikr.IKr'])
+            plt.title('Step-wise recorded traces')
+            plt.ylabel('Current density [pA/pF]')
+            plt.xlabel('Time [ms]')
+            plt.tight_layout()
+     
+    # Normalize the tail currents
+    tail_norm = Ikr_tail/max(Ikr_tail)
+     
+    # Determine the time corresponding to the V1/2
+    hlf = np.interp(0.5, tail_norm, t_steps)
+     
+    # Plot the normalized tail values
+    if showit == 1:
+        plt.figure()
+        if log == 1:
+            plt.semilogx(t_steps, tail_norm, 'o-', color = 'black', label = f'{temp}°C')
+        else: 
+            plt.plot(t_steps, tail_norm, 'o-', color = 'black', label = f'{temp}°C')
+        plt.xlabel('Prepulse duration [ms]')
+        plt.ylabel('Normalized tail current')
+        plt.legend(title = 'Temperature')
+        plt.suptitle('Normalized tail values')
+        plt.tight_layout()
+         
+    # Initialize estimated parameters for curve fitting
+    p0_act = (-1, 700, 1)
+    
+    # Fit the curve fit funcion with a mono-exponential approach
+    par_opt, par_cov = curve_fit(mono_exp, t_steps, tail_norm, p0 = p0_act, maxfev = 3000)
+    
+    # Fitted time constants
+    tau = par_opt[1]
+    
+    # Plot the curve fitting results together with the normalized tail current for each activation duration
+    # step 
+    if showcurve == 1: 
+        plt.figure()
+        if log == 0:
+            plt.plot(t_steps, tail_norm,'o-', color = 'black', label = f'{temp}°C')
+            plt.plot(t_steps, np.asarray(mono_exp(t_steps, -1, tau, 1)), '-', color = 'red', label = "Fitted Tau" )
+        else:
+            plt.semilogx(t_steps, tail_norm,'o-', color = 'black', label = f'{temp}°C')
+            plt.semilogx(t_steps, np.asarray(mono_exp(t_steps, -1, tau, 1)), '-', color = 'red', label = "Fitted Tau" )
+        plt.xlabel('Prepulse duration [ms]')
+        plt.ylabel('Normalized tail current')
+        plt.suptitle('Normalized tail values')
+        plt.legend()
+        plt.tight_layout()
+        
+    return dict(peak_val = Ikr_peak, tail_val = Ikr_tail, half_val = hlf, tail_norm = tail_norm, tau = tau)
+#%% Calculate the time constants related to deactivation
+def ZhouDeactTime(modeltype, temp, sim, time, tot_dur, showit = 0, showcurve = 0, log = 0):
+    """ ZhouDeactTime function
+    The ZhouDeactTime function can be used to calculate the deactivation time constants based on protocols
+    from Zhou et al. 1998.
+    
+    Parameters
+    ----------
+    modeltype : Integer
+        Determine the modeltype (See MMT file).
+        
+    temp : Integer
+         Temperature input in degrees Celsius.
+         
+    sim : Myokit simulation protocol
+         Simulation protocol.
+    
+    time : Integer
+        Maximum time of all events in the protocol.
+        
+    tot_dur : Integer
+        Total duration of one iteration.
+        
+    showit : Integer
+        Visualize a plot with score one and score two visualizes the curve fitting.
+        
+    showcurve : Integer
+        Visualizes the curve fitting procedure for score one.
+               
+    log : Integer
+        Create a logarithmic x-axis for visualization.
+          
+    Returns
+    -------
+    Dictionary with the tail current duration, values, relative amplitudes and time constants.
+    """ 
+    # Reset the initial states for each iteration 
+    sim.reset()
+    
+    # Set the model type
+    sim.set_constant('ikr.IKr_modeltype', modeltype) 
+    
+    # Set the maximum stepsize to 2ms
+    sim.set_max_step_size(2) 
+    
+    # Set the temperature
+    sim.set_constant('ikr_MM.IKr_temp', temp)
+    
+    # Set the extracellular potassium concentration 
+    sim.set_constant('extra.Ko', 4)
+    
+    # Set tolerance to counter suboptimal optimalisation with CVODE
+    sim.set_tolerance(1e-8, 1e-8)
+    
+    # Run the simulation protocol and log several variables
+    dur = sim.run(time, log=['engine.time', 'membrane.V', 'ikr.IKr'])
+    
+    # Plot the curves for each step
+    if showit == 1: 
+        plt.subplot(2,1,1)
+        plt.plot(dur['engine.time'], dur['membrane.V'])
+        plt.xlabel('Time [ms]')
+        plt.ylabel('Membrane potential [mV]')
+        plt.title('Voltage-clamp protocol in steps')
+        plt.subplot(2,1,2)
+        plt.plot(dur['engine.time'], dur['ikr.IKr'])
+        plt.title('Step-wise recorded traces')
+        plt.xlabel('Time [ms]')
+        plt.ylabel('pA/pF')
+        plt.tight_layout()
+        
+    # Split the log into smaller chunks to overlay; to get the individual steps 
+    ds = dur.split_periodic(tot_dur, adjust=True) 
+    
+    # Initialize the peak current variable
+    Ikr_steady = np.zeros(len(ds)) 
+    # Initialize the tail current variable
+    Ikr_tail = np.zeros(len(ds)) 
+    # Initialize the fast time constants variable
+    tau_f = np.zeros(len(ds))
+    # Initialize the slow time constants variable
+    tau_s = np.zeros(len(ds))
+    # Initialize the relative amplitude variable
+    rel_amp = np.zeros(len(ds))
+    # Initialize the weighted time constant variable
+    tau_w = np.zeros(len(ds))
+        
+    # Trim each new log to contain the steps of interest by enumerate through 
+    # the individual voltage steps 
+    for k, d in enumerate(ds):
+        # Adjust is the time at the start of every sweep which is set to zero
+        steady = d.trim_left(501, adjust = True) 
+        # Duration of the peak/steady current 
+        steady = steady.trim_right(1000) 
+        # Total step duration (holding potential + peak current + margin of some ms) to ensure the tail current
+        tail = d.trim_left(1505, adjust = True) 
+        # Duration of the tail current (1000 ms)
+        tail = tail.trim_right(1000) 
+        # Obtain the absolute tail current to prevent sign changes around rev. potential
+        tail_IKr_abs = abs(np.array(tail['ikr.IKr']))
+        # Create an array that contains the duration of the tail currents
+        tail_dur_deact = np.asarray(tail['engine.time'])
+        
+        # Initialize estimated parameters for curve fitting
+        # parameter 'a1' = Zhou et al. 1998 shows a relative amplitude (at -70 mV) of (afast/(afast + aslow) ~ 0.8 of the actual amplitude
+        # parameter 'a2' = Zhou et al. 1998 shows a relative amplitude (at -70 mV) of 1-(afast_/afast + aslow) ~ 0.2 of the actual amplitude
+        # parameter 'tau1' = Derived from Zhou et al. 1998 experimental tau_fast is 64 ms 
+        # parameter 'tau2' = Derived from experimental Zhou et al. 1998 tau_slow is 303 ms
+        # parameter 'c' = Deactivation shows decay, so always zero
+        # Note, tau always needs to be positive
+        a1 = 0.8
+        tau1 = 64
+        a2 = 0.2
+        tau2 = 303
+        con = 0
+        p0 = (a1, tau1, a2, tau2, con)
+        
+        # Perform curve fitting w/ double exponential function for deactivation to obtain fast and slow tau
+        # Note, set bounds otherwise the curve fitting will overflow. The lower bounds are always zero, 
+        # because the tau cannot be negative. In this case, a pulse of 1 ms was used and thus the max for 
+        # tau is roughly 500 ms.
+        par_opt, par_cov = curve_fit(double_exp, tail_dur_deact, tail_IKr_abs, p0 = p0, maxfev = 3000, bounds = (0, [10, 500, 10, 500, 1]))
+        
+        # Fitted time constants (tau fast and tau slow)
+        # Note, there is a potential flipping of tau_f and tau_s during optimization
+        # (e.g. first: tau1 < tau2, after optimization tau1 > tau2)
+        # Create an if-statement to counter this problem. Furthermore, the relative amplitude 
+        # is (afast/(afast + aslow))
+        if par_opt[1] < par_opt[3]:
+            tau_f[k] = par_opt[1]
+            tau_s[k] = par_opt[3]
+            rel_amp[k] = par_opt[0]/(par_opt[0] + par_opt[2])
+        else:
+            tau_f[k] = par_opt[3]
+            tau_s[k] = par_opt[1]
+            rel_amp[k] = par_opt[2]/(par_opt[0] + par_opt[2])
+
+        # Calculate the tau weighted by multiplying the relative amplitude with the fast time constant
+        # and the 1-relative amplitude with the slow time constant. 
+        tau_w = (rel_amp * tau_f) + ((1-rel_amp) * tau_s)
+    
+        # Plot the curve fitting procedure
+        if showcurve == 1:
+            plt.figure()
+            plt.subplot(2,1,1)
+            plt.plot(tail['engine.time'], tail['membrane.V'])
+            plt.ylabel('Membrane potential [mV]')
+            plt.xlabel('Time [ms]')
+            plt.subplot(2,1,2)
+            plt.plot(tail_dur_deact, tail_IKr_abs, '.',tail_dur_deact, np.asarray(double_exp(tail_dur_deact, *par_opt)), '-')
+            plt.ylabel('Current [pA]')
+            plt.xlabel('Time [ms]')
+            plt.tight_layout()
+        
+        # Plot the voltage-clamp protocol together with the corresponding traces 
+        if showit == 1:
+            plt.figure()
+            plt.subplot(2,1,1)
+            plt.plot(d['engine.time'], d['membrane.V'])
+            plt.ylabel('Membrane potential [mV]')
+            plt.title('Voltage-clamp protocol')
+            plt.subplot(2,1,2)
+            plt.plot(d['engine.time'], d['ikr.IKr'])
+            plt.title('Step-wise recorded traces')
+            plt.ylabel('Current density [pA/pF]')
+            plt.xlabel('Time [ms]')
+            plt.tight_layout()
+    
+    return dict(tail_dur = tail_dur_deact, tail_abs = tail_IKr_abs, tail_val = Ikr_tail, tau_fast = tau_f, tau_slow = tau_s, rel_amp = rel_amp, tau_weight = tau_w)
+#%% Create a function to calculate the shift in midpoint activation between temperatures
+def ZhouActVolt(modeltype, temp, sim, time, tot_dur, v_steps, showit = 0):
+    """ ZhouActVolt function
+    The ZhouActVolt function creates a voltage clamp protocol that allows to compare the temperature-dependent 
+    shift in half maximal channel activation between two temperatures. This is based on protocols from Zhou et al.
+    1998.
+    
+    Parameters
+    ----------
+    modeltype : Integer
+        Determine the modeltype (See MMT file).
+        
+    temp : Integer
+         Temperature input in degrees Celsius.
+         
+    sim : Myokit simulation protocol
+         Simulation protocol.
+    
+    time : Integer
+        Maximum time of all events in the protocol.
+        
+    tot_dur : Integer
+        Total duration of one iteration.
+        
+    v_steps : List
+        Voltage steps.
+        
+    showit : Integer
+        Visualize a plot with score one and score two visualizes the curve fitting.
+          
+    Returns
+    -------
+    Dictionary with peak, tail and V1/2 values.
+    """ 
+
+    # Reset the initial states for each iteration 
+    sim.reset()
+    
+    # Set the model type
+    sim.set_constant('ikr.IKr_modeltype', modeltype) 
+    
+    # Set the maximum stepsize to 2ms
+    sim.set_max_step_size(2) 
+    
+    # Set the temperature
+    sim.set_constant('ikr_MM.IKr_temp', temp)
+    
+    # Set the extracellular potassium concentration 
+    sim.set_constant('extra.Ko', 4)
+    
+    # Set tolerance to counter suboptimal optimalisation with CVODE
+    sim.set_tolerance(1e-8, 1e-8)
+    
+    # Run the simulation protocol and log several variables
+    dur = sim.run(time, log=['engine.time', 'membrane.V', 'ikr.IKr'])
+    
+    # Plot the curves for each step
+    if showit == 1: 
+        plt.subplot(2,1,1)
+        plt.plot(dur['engine.time'], dur['membrane.V'])
+        plt.xlabel('Time [ms]')
+        plt.ylabel('Membrane potential [mV]')
+        plt.title('Voltage-clamp protocol in steps')
+        plt.subplot(2,1,2)
+        plt.plot(dur['engine.time'], dur['ikr.IKr'])
+        plt.title('Step-wise recorded traces')
+        plt.xlabel('Time [ms]')
+        plt.ylabel('pA/pF')
+        plt.tight_layout()
+        
+    # Split the log into smaller chunks to overlay; to get the individual steps 
+    ds = dur.split_periodic(tot_dur, adjust=True) 
+    
+    # Initialize the peak current variable
+    Ikr_steady = np.zeros(len(ds)) 
+    # Initialize the tail current variable
+    Ikr_tail = np.zeros(len(ds)) 
+    
+    # Trim each new log to contain the steps of interest by enumerate through 
+    # the individual voltage steps 
+    for k, d in enumerate(ds):
+        # Adjust is the time at the start of every sweep which is set to zero
+        steady = d.trim_left(500, adjust = True) 
+        # Duration of the peak/steady current 
+        steady = steady.trim_right(4000) 
+        # Total step duration (holding potential + peak current + margin of some ms) to ensure the tail current
+        tail = d.trim_left(4501, adjust = True) 
+        # Duration of the tail current (5000 ms)
+        tail = tail.trim_right(5000) 
+        # Obtain the absolute tail current to prevent sign changes around rev. potential
+        tail_IKr_abs = abs(np.array(tail['ikr.IKr']))
+        # IKr tail amplitude was defined as current at the start of the repol. step minus the current at the end of repol.
+        Ikr_tail[k] = max(tail['ikr.IKr']) - min(tail['ikr.IKr'])  
+        # Note, you could also just take the max of the tail which does not meaningfully affect the results (if any, few 100ths).
+        #Ikr_tail[k] = max(tail_IKr_abs)
+        
+        # Plot the voltage-clamp protocol together with the corresponding traces 
+        if showit == 1:
+            plt.figure()
+            plt.subplot(2,1,1)
+            plt.plot(d['engine.time'], d['membrane.V'])
+            plt.ylabel('Membrane potential [mV]')
+            plt.title('Voltage-clamp protocol')
+            plt.subplot(2,1,2)
+            plt.plot(d['engine.time'], d['ikr.IKr'])
+            plt.title('Step-wise recorded traces')
+            plt.ylabel('Current density [pA/pF]')
+            plt.xlabel('Time [ms]')
+            plt.tight_layout()
+
+    # Normalize the tail current
+    tail_norm = Ikr_tail/max(Ikr_tail)
+    
+    # Determine the voltage corresponding to the V1/2 current
+    hlf = np.interp(0.5, tail_norm, v_steps)
+    
+    return dict(peak_val = Ikr_steady, tail_abs = tail_IKr_abs, tail_val = Ikr_tail, tail_norm = tail_norm, half_val = hlf)
+#%% Create a function to calculate the time constants related to inactivation
+
+def ZhouInactTime(modeltype, temp, sim, time, tot_dur, showit = 0, showcurve = 0):
+    """ ZhouInactTime function
+    The ZhouInactTime function can be used to calculate the inactivation time constants based on protocols
+    from Zhou et al. 1998.
+    
+     
+    Parameters
+    ----------
+    modeltype : Integer
+        Determine the modeltype (See MMT file).
+        
+    temp : Integer
+         Temperature input in degrees Celsius.
+         
+    sim : Myokit simulation protocol
+         Simulation protocol.
+    
+    time : Integer
+        Maximum time of all events in the protocol.
+        
+    tot_dur : Integer
+        Total duration of one iteration.
+        
+    showit : Integer
+        Visualize a plot with score one and score two visualizes the curve fitting.
+        
+    showcurve : Integer
+        Visualizes the curve fitting procedure for score one.
+               
+          
+    Returns
+    -------
+    Dictionary that contains tail current values, duration and time constants.
+    """ 
+    # Reset the initial states for each iteration 
+    sim.reset()
+    
+    # Set the model type
+    sim.set_constant('ikr.IKr_modeltype', modeltype) 
+    
+    # Set the maximum stepsize to 2ms
+    sim.set_max_step_size(2) 
+    
+    # Set the temperature
+    sim.set_constant('ikr_MM.IKr_temp', temp)
+
+    # Set the extracellular potassium concentration
+    sim.set_constant('extra.Ko', 4)
+    
+    # Set tolerance to counter suboptimal optimalisation with CVODE
+    sim.set_tolerance(1e-8, 1e-8)
+    
+    # Run the simulation protocol and log several variables
+    dur = sim.run(time, log=['engine.time', 'membrane.V', 'ikr.IKr'])
+    
+    # Plot the curves for each step
+    if showit == 1: 
+        plt.subplot(2,1,1)
+        plt.plot(dur['engine.time'], dur['membrane.V'])
+        plt.xlabel('Time [ms]')
+        plt.ylabel('Membrane potential [mV]')
+        plt.title('Voltage-clamp protocol in steps')
+        plt.subplot(2,1,2)
+        plt.plot(dur['engine.time'], dur['ikr.IKr'])
+        plt.title('Step-wise recorded traces')
+        plt.xlabel('Time [ms]')
+        plt.ylabel('pA/pF')
+        plt.tight_layout()
+        
+    # Split the log into smaller chunks to overlay; to get the individual steps 
+    ds = dur.split_periodic(tot_dur, adjust=True) 
+    
+    # Initialize the tail current variable
+    Ikr_tail = np.zeros(len(ds)) 
+    # Initialize the time constant variable 
+    tau = np.zeros(len(ds))
+
+    # Trim each new log to contain the steps of interest by enumerate through 
+    # the individual voltage steps 
+    for k, d in enumerate(ds):
+        # Total step duration (holding potential + peak current + repolarizing current) to ensure the tail current
+        tail = d.trim_left(702, adjust = True) 
+        # Duration of the tail current (20 ms)
+        tail = tail.trim_right(20) 
+        # Obtain the absolute tail current to prevent sign changes around rev. potential
+        tail_IKr_abs = abs(np.array(tail['ikr.IKr'])) 
+        # Create an array that contains the duration of the tail currents
+        tail_dur_inact = np.asarray(tail['engine.time'])
+        
+        # Initialize estimated parameters for curve fitting
+        a = -1
+        t = 10
+        c = 0
+        p0 = (a, t, c)
+        
+        # Fit the curve fit function with a mono exponential approach
+        par_opt, par_cov = curve_fit(mono_exp, tail_dur_inact, tail_IKr_abs, p0 = p0, maxfev = 3000)
+    
+        # Fitted time constants
+        tau[k] = par_opt[1]
+    
+        # Plot the curve fitting procedure
+        if showcurve == 1:
+            plt.figure()
+            plt.subplot(2,1,1)
+            plt.plot(tail['engine.time'], tail['membrane.V'])
+            plt.ylabel('Membrane potential [mV]')
+            plt.xlabel('Time [ms]')
+            plt.subplot(2,1,2)
+            plt.plot(tail_dur_inact, tail_IKr_abs, '.',tail_dur_inact, np.asarray(mono_exp(tail_dur_inact, *par_opt)), '-')
+            plt.ylabel('Current [pA]')
+            plt.xlabel('Time [ms]')
+            plt.tight_layout()
+        
+        # Plot the voltage-clamp protocol together with the corresponding traces 
+        if showit == 1:
+            plt.figure()
+            plt.subplot(2,1,1)
+            plt.plot(d['engine.time'], d['membrane.V'])
+            plt.ylabel('Membrane potential [mV]')
+            plt.title('Voltage-clamp protocol')
+            plt.subplot(2,1,2)
+            plt.plot(d['engine.time'], d['ikr.IKr'])
+            plt.title('Step-wise recorded traces')
+            plt.ylabel('Current density [pA/pF]')
+            plt.xlabel('Time [ms]')
+            plt.tight_layout()
+        
+    return dict(tail_dur = tail_dur_inact, tail_abs = tail_IKr_abs, tail_val = Ikr_tail, tau = tau)  
+
+#%% Create a function that allows to calculate the time constants related to recovery from inactivation 
+def ZhouRecovTime(modeltype, temp, sim, time, tot_dur, showit = 0, showcurve = 0):
+    """ ZhouRecovTime function
+    The ZhouRecovTime function can be used to calculate the recovery from inactivation time constants.
+    Note, the time constants are calculated with both a mono exponent (> -40 mV) and a double exponent (<= - 40 mV)
+    similar to Zhou et al. 1998. 
+    
+    Parameters
+    ----------
+    modeltype : Integer
+        Determine the modeltype (See MMT file).
+        
+    temp : Integer
+         Temperature input in degrees Celsius.
+         
+    sim : Myokit simulation protocol
+         Simulation protocol.
+    
+    time : Integer
+        Maximum time of all events in the protocol.
+        
+    tot_dur : Integer
+        Total duration of one iteration.
+        
+    showit : Integer
+        Visualize a plot with score one and score two visualizes the curve fitting.
+        
+    showcurve : Integer
+        Visualizes the curve fitting procedure for score one.
+               
+                  
+    Returns
+    -------
+    Dictionary that contains the tail current value, duration and time constants (mono, fast and slow).
+    """ 
+    # Reset the initial states for each iteration 
+    sim.reset()
+    
+    # Set the model type
+    sim.set_constant('ikr.IKr_modeltype', modeltype) 
+    
+    # Set the maximum stepsize to 2ms
+    sim.set_max_step_size(2) 
+    
+    # Set the temperature
+    sim.set_constant('ikr_MM.IKr_temp', temp)
+        
+    # Set the extracellular potassium concentration
+    sim.set_constant('extra.Ko', 4)
+    
+    # Set tolerance to counter suboptimal optimalisation with CVODE
+    sim.set_tolerance(1e-8, 1e-8)
+    
+    # Run the simulation protocol and log several variables
+    dur = sim.run(time, log=['engine.time', 'membrane.V', 'ikr.IKr'])
+    
+    # Plot the curves for each step
+    if showit == 1: 
+        plt.subplot(2,1,1)
+        plt.plot(dur['engine.time'], dur['membrane.V'])
+        plt.xlabel('Time [ms]')
+        plt.ylabel('Membrane potential [mV]')
+        plt.title('Voltage-clamp protocol in steps')
+        plt.subplot(2,1,2)
+        plt.plot(dur['engine.time'], dur['ikr.IKr'])
+        plt.title('Step-wise recorded traces')
+        plt.xlabel('Time [ms]')
+        plt.ylabel('pA/pF')
+        plt.tight_layout()
+        
+    # Split the log into smaller chunks to overlay; to get the individual steps 
+    ds = dur.split_periodic(tot_dur, adjust=True) 
+    
+    # Initialize the tail current variable
+    Ikr_tail = np.zeros(len(ds)) 
+    # Initialize the mono exponential time constant
+    tau_m = np.zeros(len(ds))
+    # Initialize the fast time constants variable
+    tau_f = np.zeros(len(ds))
+    # Initialize the slow time constants variable
+    tau_s = np.zeros(len(ds))
+    # Initialize the afast variable
+    a_fast = np.zeros(len(ds))
+    # Initialize the aslow variable
+    a_slow = np.zeros(len(ds))
+    
+    # Trim each new log to contain the steps of interest by enumerate through 
+    # the individual voltage steps 
+    for k, d in enumerate(ds):
+        # Trim the tail current
+        tail = d.trim_left(700, adjust = True) 
+        # Duration of the tail current (10ms or 20ms)
+        tail = tail.trim_right(20) 
+        # Obtain the absolute tail current to prevent sign changes around rev. potential
+        tail_IKr_abs = abs(np.array(tail['ikr.IKr']))
+        # Create an array that contains the duration of the tail currents
+        tail_dur_recov = np.asarray(tail['engine.time'])
+        
+        # In Zhou et al. 1998 pg. 235, they write: 'The time constant of recovery from inactivation
+        # was measured as the mono exponential fit to the tail current rising phase (> -40 mV) or as the fast
+        # time constant of a double exponential fit (<= -40 mV), where deactivation is present in the tail current
+        # deactivation is slow
+        
+        # Initialize p0 for both a mono exponential function and double exponential function
+        p0_mono = (-1, 5, 1) 
+        p0_bi = (0.8, 3, 0.2, 30, 1)
+        
+        if k < 1:
+            # Fit the curve fit function with a mono exponential approach
+            par_opt, par_cov = curve_fit(mono_exp, tail_dur_recov, tail_IKr_abs, p0 = p0_mono, maxfev = 3000)
+        
+            # Fitted time constants
+            tau_m[k] = par_opt[1]
+      
+            # Plot the curve fitting procedure
+            # Note, the monoexponent levels off after the increase and does not
+            # decrease like the biexponent. This is also the reason why at <-40 mV
+            # the curve fitting is performed with a double exponent, because after
+            # the initial recovery there is deactivation at these low voltages.
+            if showcurve == 1:
+                plt.figure()
+                plt.subplot(2,1,1)
+                plt.plot(tail['engine.time'], tail['membrane.V'])
+                plt.ylabel('Membrane potential [mV]')
+                plt.xlabel('Time [ms]')
+                plt.subplot(2,1,2)
+                plt.plot(tail_dur_recov, tail_IKr_abs, '.',tail_dur_recov, np.asarray(mono_exp(tail_dur_recov, *par_opt)), '-')
+                plt.ylabel('Current [pA]')
+                plt.xlabel('Time [ms]')
+                plt.tight_layout()
+        else: 
+            # Fit the curve fit function with a double exponential approach
+            # Note, put bounds of zero on taus, because they cannot be negative.
+            # The a's can be negative due to the initial increase in current 
+            # (recovery from inactivation) followed by a decrease in current
+            # due to deactivation. Therefore, the a's move in opposite directions
+            # where afast represents the recovery and aslow the deactivation. This
+            # is only true for a biexponent.
+            par_opt, par_cov = curve_fit(double_exp, tail_dur_recov, tail_IKr_abs, p0 = p0_bi, maxfev = 3000, bounds = ([-10, 0, -10, 0, -10], [10, 200, 10, 200, 10]))
+            
+            # Fitted time constants (fast and slow)
+            if par_opt[1] < par_opt[3]:
+                tau_f[k] = par_opt[1]
+                tau_s[k] = par_opt[3]
+                a_fast[k] = par_opt[0]
+                a_slow[k] = par_opt[2]
+            else:
+                tau_f[k] = par_opt[3]
+                tau_s[k] = par_opt[1]
+                a_fast[k] = par_opt[2]
+                a_slow[k] = par_opt[0]
+        
+            # Plot the curve fitting procedure
+            if showcurve == 1:
+                plt.figure()
+                plt.subplot(2,1,1)
+                plt.plot(tail['engine.time'], tail['membrane.V'])
+                plt.ylabel('Membrane potential [mV]')
+                plt.xlabel('Time [ms]')
+                plt.subplot(2,1,2)
+                plt.plot(tail_dur_recov, tail_IKr_abs, '.',tail_dur_recov, np.asarray(double_exp(tail_dur_recov, *par_opt)), '-')
+                plt.ylabel('Current [pA]')
+                plt.xlabel('Time [ms]')
+                plt.tight_layout()
+        
+        # Plot the voltage-clamp protocol together with the corresponding traces 
+        if showit == 1:
+            plt.figure()
+            plt.subplot(2,1,1)
+            plt.plot(d['engine.time'], d['membrane.V'])
+            plt.ylabel('Membrane potential [mV]')
+            plt.title('Voltage-clamp protocol')
+            plt.subplot(2,1,2)
+            plt.plot(d['engine.time'], d['ikr.IKr'])
+            plt.title('Step-wise recorded traces')
+            plt.ylabel('Current density [pA/pF]')
+            plt.xlabel('Time [ms]')
+            plt.tight_layout()
+              
+    return dict(tail_dur = tail_dur_recov, tail_abs = tail_IKr_abs, tail_val = Ikr_tail, tau_fast = tau_f, tau_slow = tau_s, tau_mono = tau_m, afast = a_fast, aslow = a_slow)

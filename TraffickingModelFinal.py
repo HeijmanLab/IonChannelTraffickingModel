@@ -24,7 +24,7 @@ work_dir = os.getcwd()
 if 'Documents' in work_dir: 
     work_dir = work_dir
 else: 
-    work_dir = os.path.join(work_dir, 'Documents', 'PhD', 'Python', 'GitHub', 'IonChannelTrafficking')
+    work_dir = os.path.join(work_dir, 'Documents', 'PhD', 'Python', 'GitHub', 'IonChannelTraffickingModel')
 os.chdir(work_dir)
 files = [f for f in os.listdir('.') if os.path.isfile(f)]
 for f in files:
@@ -1005,7 +1005,7 @@ for i in range(len(dof_time1umP)):
 #%% Temperature dependent-regulation of IKr gating as shown in Figure 6. 
 
 # Format a dataframe for plotting of Q10s and V1/2.
-Q10_V = {'Value':[6.25, 4.55, Q10_dataframe.iloc[0, 1], 1.36, 2.56, Q10_dataframe.iloc[0, 2], 
+Q10_V = {'Value':[6.25, 4.54, Q10_dataframe.iloc[0, 1], 1.36, 2.56, Q10_dataframe.iloc[0, 2], 
                   3.55, 3.21, Q10_dataframe.iloc[0, 3], 3.65, 3.45, Q10_dataframe.iloc[0, 4], 
                   13.9, 10.3, Q10_dataframe.iloc[0, 5]], 
         'Input':['Zhou et al. (1998)', 'Mauerhöfer & Bauer (2016)', 'Model',
@@ -1018,7 +1018,7 @@ Q10_V = {'Value':[6.25, 4.55, Q10_dataframe.iloc[0, 1], 1.36, 2.56, Q10_datafram
                  'Inactivation', 'Inactivation', 'Inactivation', 
                  'Recovery', 'Recovery', 'Recovery',
                  '$V_{1/2}$', '$V_{1/2}$', '$V_{1/2}$'],
-        'error': [2.55, 1.24, 0, 0.04, 0.97, 0, 0.87, 0.7, 0, 0.73, 0.62, 0, 0, 0, 0]}
+        'error': [2.55, 1.24, 0, 0.4, 0.97, 0, 0.87, 0.7, 0, 0.73, 0.62, 0, 0, 0, 0]}
 
 # Create a new dataframe.
 Q10df = pd.DataFrame(Q10_V)
