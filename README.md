@@ -5,6 +5,8 @@ Doi: [10.1113/JP283976](https://physoc.onlinelibrary.wiley.com/doi/10.1113/JP283
 
 :file_folder: The [MMT](https://github.com/HeijmanLab/IonChannelTraffickingModel/tree/main/MMT) folder contains the adapted O'Hara Rudy human ventricular cardiomyocyte model (ORd), wherein Clancy and Rudy's I<sub>Kr</sub> Markov model was implemented and adapted to model the acute effects of temperature on I<sub>Kr</sub>  gating. Moreover, the trafficking model with its modulators (i.e., temperature, drugs, and extracellular K<sup>+</sup> was also added to the ORd model. 
 
+:file_folder: The [Q10](https://github.com/HeijmanLab/IonChannelTraffickingModel/tree/main/Q10) folder contains the Q<sub>10</sub> and V<sub>1/2</sub> optimization scripts. 
+
 :file_folder: The [Data](https://github.com/HeijmanLab/IonChannelTraffickingModel/tree/main/Data) folder contains all the experimental data needed for the simulations (generally obtained with MyoKit's graph data extractor). 
 
 :file_folder: The [Figures](https://github.com/HeijmanLab/IonChannelTraffickingModel/tree/main/Figures) folder is a results folders where some of the figures will be stored. 
