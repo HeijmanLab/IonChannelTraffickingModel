@@ -16,7 +16,7 @@ Doi: [10.1113/JP283976](https://physoc.onlinelibrary.wiley.com/doi/10.1113/JP283
 :computer: :snake: The functions used for the above-mentioned simulations can be found in [TraffickingModelFunctions](https://github.com/HeijmanLab/IonChannelTraffickingModel/blob/main/TraffickingModelFunctions.py).
 
 
-## Virtual enviroment (Instructions for Anaconda):
+## Virtual environment (Instructions for Anaconda):
 
 Follow the below mentioned steps to re-create te virtual environment with all the correct package versions for this project.
 
