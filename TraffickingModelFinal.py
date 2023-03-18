@@ -21,10 +21,7 @@ import os
 
 # Set directories. Note, the directories need to be set correctly on your own device.
 work_dir = os.getcwd() 
-if 'Documents' in work_dir: 
-    work_dir = work_dir
-else: 
-    work_dir = os.path.join(work_dir, 'Documents', 'PhD', 'Python', 'GitHub', 'IonChannelTraffickingModel')
+work_dir = os.path.join(work_dir, 'fill_in_your_paths', 'IonChannelTraffickingModel')
 os.chdir(work_dir)
 files = [f for f in os.listdir('.') if os.path.isfile(f)]
 for f in files:
